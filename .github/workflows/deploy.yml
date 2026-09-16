@@ -25,15 +25,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
-      # No lockfile and no runtime dependencies, so there is nothing to install:
-      # wrangler-action pulls the pinned wrangler itself.
+      # wrangler-action shells out to npx, which refuses to download a package
+      # non-interactively — so install the pinned wrangler from the lockfile first.
+      - run: npm ci
+
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: '4.132.0'
 
       - name: Smoke-test the deployment
         run: |
