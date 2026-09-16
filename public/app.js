@@ -23,7 +23,8 @@ const state = {
   groupDupes: localStorage.getItem('groupDupes') !== '0', // on by default
   query: '',
   items: [],
-  updated: 0,
+  updated: 0,     // when the server last polled the feeds
+  fetchedAt: 0,   // when this page last read the server
 };
 
 function istToday() {
@@ -140,9 +141,23 @@ function renderImportant(data) {
     : '<div class="empty">Nothing above the impact threshold since the last close.</div>';
 }
 
+function ago(ts) {
+  if (!ts) return 'never';
+  const mins = Math.round((Date.now() - ts) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  return hrs < 24 ? `${hrs}h ago` : `${Math.floor(hrs / 24)}d ago`;
+}
+
+/**
+ * Two different clocks, and conflating them made a working page look stuck: the
+ * feeds are polled hourly, so that timestamp only moves once an hour however
+ * often the page reloads. Show when this page last checked as well.
+ */
 function renderUpdated() {
   $('updated').textContent = state.updated
-    ? `UPDATED · ${istStamp(state.updated)} IST`
+    ? `UPDATED · ${istStamp(state.updated)} IST · checked ${ago(state.fetchedAt)}`
     : 'UPDATED · never';
   $('todayFlag').textContent = state.date === istToday() ? 'Today' : '';
 }
@@ -174,6 +189,7 @@ async function loadDay() {
   const data = await res.json();
   state.items = data.items || [];
   state.updated = data.updated || state.updated;
+  state.fetchedAt = Date.now();
   state.page = 1;
   renderUpdated();
   renderDayNote();
@@ -297,14 +313,38 @@ renderTabs();
 wire();
 loadDay();
 loadImportant();
-// The server polls hourly around the clock, so re-read KV on the same rhythm
-// whenever today's page is actually on screen.
-setInterval(() => {
-  if (state.date === istToday() && document.visibilityState === 'visible') {
-    loadDay();
-    loadImportant();
+// Auto-refresh.
+//
+// A bare setInterval was not enough: mobile browsers suspend timers in a
+// backgrounded tab, so reopening the app (or restoring it from the back/forward
+// cache) could show stale data indefinitely — the tick that would have refreshed
+// it never ran. Refresh on every event that means "the user is looking at this
+// again", throttled so the events cannot stampede.
+let refreshing = false;
+async function refreshIfStale(maxAgeMs) {
+  if (refreshing) return;
+  if (state.date !== istToday()) return;          // past days never change
+  if (Date.now() - state.fetchedAt < maxAgeMs) return;
+  refreshing = true;
+  try {
+    await Promise.all([loadDay(), loadImportant()]);
+  } catch {
+    /* offline or a blip: the next trigger tries again */
+  } finally {
+    refreshing = false;
   }
-}, 10 * 60 * 1000);
+}
+
+setInterval(() => refreshIfStale(4.5 * 60 * 1000), 5 * 60 * 1000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshIfStale(60 * 1000);
+});
+window.addEventListener('focus', () => refreshIfStale(60 * 1000));
+window.addEventListener('pageshow', (e) => refreshIfStale(e.persisted ? 0 : 60 * 1000));
+window.addEventListener('online', () => refreshIfStale(0));
+
+// Keep the "checked Nm ago" label honest between refreshes.
+setInterval(renderUpdated, 30 * 1000);
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});

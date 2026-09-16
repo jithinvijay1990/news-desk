@@ -241,6 +241,7 @@ async function readMeta(env) {
   );
   return {
     updated: raw.updated || 0,
+    previousRun: raw.previousRun || 0,
     batches: raw.batches || BATCHES,
     batchUpdated: raw.batchUpdated || {},
     okCount: feeds.filter((f) => f.ok).length,
