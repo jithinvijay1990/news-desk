@@ -212,7 +212,9 @@ export async function ingest(env, batch = 0) {
     days: [...byDay.keys()],
     stored: written,
     added,
-    previousRun: prev.updated || 0, // so /api/health shows the gap between runs
+    // Compare against the last run of THIS batch: both batches write meta within
+    // the same minute, so prev.updated would just measure the batch spacing.
+    previousRun: (prev.batchUpdated || {})[batch] || 0,
   };
   await env.NEWS.put('meta', JSON.stringify(meta));
   return meta;
