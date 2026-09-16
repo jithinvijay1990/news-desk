@@ -7,8 +7,10 @@ categorised and archived by IST trading day.
 
 ## How it works
 
-- A Cloudflare **Worker** (`src/index.js`) polls 45 RSS/Atom feeds **hourly between 06:00 and
-  22:00 IST** (cron `30 0-16 * * *`). Nothing is polled between 23:00 and 06:00 IST.
+- A Cloudflare **Worker** (`src/index.js`) polls 45 RSS/Atom feeds **every hour, around the
+  clock** (cron `30 * * * *`, i.e. on the hour IST). Feeds only expose their latest 10–200
+  items, so any pause longer than an hour permanently loses stories from the short ones —
+  which is why there is no overnight window.
 - Each headline is scored 0–25 for likely impact on the Indian market, tagged with
   categories, the **instruments it plausibly moves** (Nifty/Sensex, Bank Nifty, Rupee,
   Crude/OMCs, Gold, Bond yields, IT, Metals, Pharma, Auto, US equities), a
@@ -51,6 +53,14 @@ npx wrangler tail         # live logs
 ```
 
 KV namespace: `NEWS` (`d4cfb328b8fc49628e9cc585b064ff0c`), bound in `wrangler.jsonc`.
+
+## Write budget
+
+KV's free tier allows **1,000 writes a day**. Each run writes the day keys it changed plus one
+metadata key, so 24 runs × 2 batches costs roughly 150 writes/day. Day keys that a batch did
+not change are skipped, which is what keeps the around-the-clock schedule comfortably inside
+the limit. Polling every 30 minutes instead would roughly double that — still inside, but with
+much less headroom.
 
 ## Why ingestion is batched
 

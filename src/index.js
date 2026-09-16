@@ -12,17 +12,10 @@ const CONCURRENCY = 8;
 // fetch plus every KV operation counts. So the feed list is ingested in batches,
 // one per cron trigger, staggered five minutes apart.
 const BATCHES = 2;
-const QUIET_FROM_IST_HOUR = 23; // no scheduled polling 23:00-06:00 IST
-const QUIET_TO_IST_HOUR = 6;
-
 function feedsForBatch(batch) {
   return FEEDS.filter((_, i) => i % BATCHES === batch);
 }
 
-function inQuietHours(ts) {
-  const hour = istDate(ts).getUTCHours();
-  return hour >= QUIET_FROM_IST_HOUR || hour < QUIET_TO_IST_HOUR;
-}
 
 // ---------------------------------------------------------------- time utils
 export function istDate(ts) {
@@ -172,11 +165,21 @@ export async function ingest(env, batch = 0) {
   }
 
   let written = 0;
+  let added = 0;
   for (const [day, items] of byDay) {
     const existing = await readDay(env, day);
     const merged = new Map();
     for (const it of existing) merged.set(it.id, it);
-    for (const it of items) if (!merged.has(it.id)) merged.set(it.id, it);
+    let fresh = 0;
+    for (const it of items) {
+      if (merged.has(it.id)) continue;
+      merged.set(it.id, it);
+      fresh++;
+    }
+    // KV's free tier allows 1,000 writes a day and running around the clock
+    // doubles the run count, so skip days this batch did not change.
+    if (!fresh) continue;
+    added += fresh;
     const list = [...merged.values()]
       .sort((a, b) => b.ts - a.ts)
       .slice(0, MAX_ITEMS_PER_DAY);
@@ -208,6 +211,8 @@ export async function ingest(env, batch = 0) {
     total: all.length,
     days: [...byDay.keys()],
     stored: written,
+    added,
+    previousRun: prev.updated || 0, // so /api/health shows the gap between runs
   };
   await env.NEWS.put('meta', JSON.stringify(meta));
   return meta;
@@ -313,9 +318,6 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    // The cron expression never fires during quiet hours; this is a belt-and-braces
-    // guard in case the schedule is edited without updating the constants.
-    if (inQuietHours(event.scheduledTime || Date.now())) return;
     ctx.waitUntil(
       (async () => {
         await ingest(env, 0);

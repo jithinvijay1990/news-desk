@@ -11,11 +11,12 @@
     "not_found_handling": "single-page-application"
   },
   "triggers": {
-    // Hourly on the hour, IST. UTC 00:30-16:30 == IST 06:00-22:00, so nothing
-    // runs between 23:00 and 06:00 IST.
+    // Every hour, around the clock (:30 UTC == :00 IST). Feeds only expose their
+    // latest 10-200 items, so a pause longer than an hour loses stories from the
+    // short ones permanently — overnight included.
     // Only one cron: the account is at the free plan's 5-trigger cap, so the
     // second ingest batch is chained through the SELF service binding instead.
-    "crons": ["30 0-16 * * *"]
+    "crons": ["30 * * * *"]
   },
   // Self-binding: each batch of feeds needs its own subrequest budget (50 per
   // invocation on the free plan), and a service-binding call starts a fresh one.

@@ -191,6 +191,11 @@ async function showHealth() {
   $('healthBody').innerHTML =
     `<div class="hrow"><span>${meta.okCount}/${meta.total} feeds OK</span>` +
     `<span>last poll ${meta.updated ? istStamp(meta.updated) + ' IST' : 'never'}</span></div>` +
+    (meta.previousRun
+      ? `<div class="hrow"><span>gap since previous run</span><span class="${
+          meta.updated - meta.previousRun > 100 * 60000 ? 'bad' : 'good'
+        }">${Math.round((meta.updated - meta.previousRun) / 60000)} min</span></div>`
+      : '') +
     (meta.feeds || [])
       .map(
         (f) => `<div class="hrow"><span>${esc(f.name)}</span>
@@ -292,14 +297,10 @@ renderTabs();
 wire();
 loadDay();
 loadImportant();
-// The server polls hourly between 06:00 and 22:00 IST, so re-read KV on the same
-// rhythm and stay quiet overnight. ("refresh feeds" still works at any hour.)
-function istHour() {
-  return new Date(Date.now() + IST_OFFSET).getUTCHours();
-}
+// The server polls hourly around the clock, so re-read KV on the same rhythm
+// whenever today's page is actually on screen.
 setInterval(() => {
-  const quiet = istHour() >= 23 || istHour() < 6;
-  if (!quiet && state.date === istToday() && document.visibilityState === 'visible') {
+  if (state.date === istToday() && document.visibilityState === 'visible') {
     loadDay();
     loadImportant();
   }
