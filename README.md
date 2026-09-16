@@ -17,8 +17,9 @@ categorised and archived by IST trading day.
   matching — no API keys, no LLM calls, no npm dependencies.
 - The same story from several outlets is collapsed into one row (`+N` badge lists the other
   sources) via a word-order-independent story hash. Toggle it off with "Merge same story".
-- Items are stored in **Workers KV** under one key per IST day (`d:YYYY-MM-DD`, 45-day TTL),
-  which is what powers the date navigation.
+- Items are stored in **Workers KV** under one key per IST day (`d:YYYY-MM-DD`, **no expiry**),
+  which is what powers the date navigation. A day that has scrolled out of every feed cannot be
+  re-fetched, so nothing is dropped; at ~250 KB/day a year costs ~90 MB of KV's free 1 GB.
 - The static UI in `public/` is served by the Worker's assets binding, installable as a PWA.
 
 ## Layout
@@ -91,8 +92,7 @@ spot a feed that has started failing; drop or replace it in `src/feeds.js`.
 `d:2026-07-10` … `d:2026-08-01` (21,343 stories) were migrated out of the predecessor's D1
 database with `scripts/migrate-d1-archive.mjs`, which re-scores every row with the *current*
 `src/score.js` so old and new days rank on the same scale, and decodes the HTML entities the
-old app stored raw. **Those keys are written without a TTL** — unlike rolling live days, that
-history cannot be re-fetched. ## The backfilled gap
+old app stored raw. Those keys, like every other day key, are written without a TTL. ## The backfilled gap
 
 `d:2026-08-02` … `d:2026-09-13` (13,684 stories) cover the window when neither app was
 running. RSS feeds only expose their latest 10–200 items, so these were rebuilt afterwards by

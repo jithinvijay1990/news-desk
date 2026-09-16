@@ -4,7 +4,6 @@ import { analyse } from './score.js';
 
 const IST_OFFSET = 5.5 * 60 * 60 * 1000;
 const MARKET_CLOSE_MIN = 15 * 60 + 30; // 15:30 IST
-const DAY_TTL_SECONDS = 60 * 60 * 24 * 45;
 const MAX_ITEMS_PER_DAY = 2500;
 const FETCH_TIMEOUT_MS = 12000;
 const CONCURRENCY = 8;
@@ -181,7 +180,9 @@ export async function ingest(env, batch = 0) {
     const list = [...merged.values()]
       .sort((a, b) => b.ts - a.ts)
       .slice(0, MAX_ITEMS_PER_DAY);
-    await env.NEWS.put(`d:${day}`, JSON.stringify(list), { expirationTtl: DAY_TTL_SECONDS });
+    // No expiry: the archive is the point of the date navigation, and a day that
+    // scrolls out of every feed cannot be re-fetched. ~250KB/day against KV's 1GB.
+    await env.NEWS.put(`d:${day}`, JSON.stringify(list));
     written += list.length;
   }
 
