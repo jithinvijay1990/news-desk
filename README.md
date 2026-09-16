@@ -92,8 +92,19 @@ spot a feed that has started failing; drop or replace it in `src/feeds.js`.
 database with `scripts/migrate-d1-archive.mjs`, which re-scores every row with the *current*
 `src/score.js` so old and new days rank on the same scale, and decodes the HTML entities the
 old app stored raw. **Those keys are written without a TTL** — unlike rolling live days, that
-history cannot be re-fetched. There is no data for 2026-08-02 … 2026-09-13; the old app
-stopped and this one had not been built yet.
+history cannot be re-fetched. ## The backfilled gap
+
+`d:2026-08-02` … `d:2026-09-13` (13,684 stories) cover the window when neither app was
+running. RSS feeds only expose their latest 10–200 items, so these were rebuilt afterwards by
+`scripts/backfill-gap.mjs`, which runs ten topic searches per day against dated news-archive
+queries. **Run it from a home connection** — Google News answers a residential IP but returns
+503 to Cloudflare's egress.
+
+Every backfilled item carries `bf: 1` and the UI labels such a day, because the coverage is a
+sample, not the feed stream: ~320 stories/day against 1,000–1,500 on a live day, no summaries,
+and links go through Google's redirector. Weekends and 15 August are visibly thinner, which is
+the right shape. GDELT is queried first but throttles to hard failures after ~20 requests, so
+the script drops it after five and continues on Google News alone.
 
 To re-run it: export the rows in pages with
 `wrangler d1 execute market-news-db --remote --json --command "select … limit 2500 offset N"`,

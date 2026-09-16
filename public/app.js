@@ -147,6 +147,26 @@ function renderUpdated() {
   $('todayFlag').textContent = state.date === istToday() ? 'Today' : '';
 }
 
+/**
+ * Days the app was not running were reconstructed from news archives, which
+ * sample rather than mirror the feeds. Say so rather than letting a thin day
+ * look like a quiet one.
+ */
+function renderDayNote() {
+  const note = $('dayNote');
+  const items = state.items;
+  const bf = items.filter((i) => i.bf).length;
+  if (!items.length || bf / items.length < 0.8) {
+    note.hidden = true;
+    return;
+  }
+  note.innerHTML =
+    `<b>Backfilled day.</b> The app was not running on ${state.date}; these ${bf} stories were `
+    + 'reconstructed afterwards from dated news-archive searches, so coverage is a sample rather '
+    + 'than the full feed stream, and summaries are missing.';
+  note.hidden = false;
+}
+
 // -------------------------------------------------------------------- data
 async function loadDay() {
   $('list').innerHTML = '<div class="empty">Loading…</div>';
@@ -156,6 +176,7 @@ async function loadDay() {
   state.updated = data.updated || state.updated;
   state.page = 1;
   renderUpdated();
+  renderDayNote();
   renderList();
 }
 

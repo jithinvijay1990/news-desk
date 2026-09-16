@@ -211,6 +211,14 @@ button, input { font: inherit; color: inherit; }
   cursor: help;
 }
 .imp-assets { margin: 2px 0; }
+.daynote {
+  padding: 9px 20px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(245, 179, 1, 0.06);
+  color: var(--muted);
+  font-size: 12px;
+}
+.daynote b { color: var(--accent); font-weight: 600; }
 
 /* ---------------------------------------------------------------- dialog */
 dialog {
