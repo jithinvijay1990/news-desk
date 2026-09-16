@@ -86,6 +86,19 @@ connection — Google News RSS returns 503, Bing News returns an empty document,
 and MarketScreener return 403, and Moneycontrol's RSS files are frozen in 2024. `GET /api/health` is the quickest way to
 spot a feed that has started failing; drop or replace it in `src/feeds.js`.
 
+## The imported archive
+
+`d:2026-07-10` … `d:2026-08-01` (21,343 stories) were migrated out of the predecessor's D1
+database with `scripts/migrate-d1-archive.mjs`, which re-scores every row with the *current*
+`src/score.js` so old and new days rank on the same scale, and decodes the HTML entities the
+old app stored raw. **Those keys are written without a TTL** — unlike rolling live days, that
+history cannot be re-fetched. There is no data for 2026-08-02 … 2026-09-13; the old app
+stopped and this one had not been built yet.
+
+To re-run it: export the rows in pages with
+`wrangler d1 execute market-news-db --remote --json --command "select … limit 2500 offset N"`,
+then `node scripts/migrate-d1-archive.mjs <dir>` and `wrangler kv key put "d:<day>" --path …`.
+
 ## Ported from the original (`market-news-desk`)
 
 The July 2026 version of this app still runs at `market-news-desk.jithinvijay1990.workers.dev`

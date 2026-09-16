@@ -4,7 +4,9 @@
 const HIGH = [
   // Central banks & rates
   'rate cut', 'rate hike', 'rate decision', 'repo rate', 'interest rate', 'fomc', 'federal reserve',
-  'fed chair', 'jerome powell', 'rbi', 'monetary policy', 'quantitative', 'bond yield', 'yields',
+  // Headlines nearly always say "Fed", not "Federal Reserve" — and name the chair.
+  'fed', 'the fed', 'fed chair', 'jerome powell', 'powell', 'warsh', 'fed official', 'fed governor',
+  'rbi', 'monetary policy', 'quantitative', 'bond yield', 'yields',
   'treasury yield', 'basis points', 'bps',
   // Inflation & growth
   'inflation', 'cpi inflation', 'wholesale price', 'wpi', 'core inflation', 'gdp', 'recession',
@@ -37,6 +39,9 @@ const MEDIUM = [
   'gold price', 'silver', 'copper', 'lithium', 'natural gas', 'coal', 'fertiliser', 'fertilizer',
   'monsoon', 'rainfall', 'drought', 'crop', 'food prices',
   'election', 'parliament', 'regulation', 'ban', 'probe', 'raid', 'fraud', 'scam', 'penalty',
+  // Geopolitical actors move risk appetite even without an explicit shock word.
+  'iran', 'israel', 'gaza', 'ukraine', 'russia', 'china', 'taiwan', 'north korea', 'pakistan',
+  'trump', 'putin', 'xi jinping', 'netanyahu', 'middle east', 'opec+', 'nato', 'brics',
   'pandemic', 'outbreak', 'virus', 'cyberattack', 'data breach', 'earthquake', 'hurricane',
   'shipping', 'freight', 'container', 'supply chain', 'visa', 'immigration', 'h-1b',
 ];
