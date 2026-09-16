@@ -59,6 +59,21 @@ already hold four. So there is a single cron, which ingests batch 0 and then cal
 back through the `SELF` service binding for batch 1; that call starts a fresh invocation with
 its own subrequest budget. Raise `BATCHES` in `src/index.js` if the feed list grows past ~80.
 
+## Deployment
+
+Pushes to `main` deploy automatically via `.github/workflows/deploy.yml`
+(`cloudflare/wrangler-action`), which then smoke-tests the live URL and prints the feed
+health count. Two repository secrets are required:
+
+| Secret | Value |
+| --- | --- |
+| `CLOUDFLARE_ACCOUNT_ID` | the account id shown by `wrangler whoami` |
+| `CLOUDFLARE_API_TOKEN` | a Cloudflare API token using the **Edit Cloudflare Workers** template (needs Workers Scripts: Edit and Workers KV Storage: Edit) |
+
+Create the token at **dash.cloudflare.com → My Profile → API Tokens**, then
+`gh secret set CLOUDFLARE_API_TOKEN`. `wrangler deploy` still works by hand for anything
+urgent.
+
 ## Feed notes
 
 **Reuters retired public RSS in 2020** — every `reuters.com` feed path returns 404 or 401, and

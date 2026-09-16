@@ -1,0 +1,46 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+  workflow_dispatch:
+
+# Never let two deploys race for the same Worker.
+concurrency:
+  group: deploy-news-desk
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No lockfile and no runtime dependencies, so there is nothing to install:
+      # wrangler-action pulls the pinned wrangler itself.
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4.132.0'
+
+      - name: Smoke-test the deployment
+        run: |
+          set -euo pipefail
+          url=https://news-desk.jithinvijay1990.workers.dev
+          code=$(curl -s -o /dev/null -w '%{http_code}' --retry 3 --retry-delay 5 "$url/")
+          echo "GET / -> $code"
+          test "$code" = "200"
+          feeds=$(curl -s "$url/api/health" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d);console.log(m.okCount+'/'+m.total)})")
+          echo "feeds healthy: $feeds"
