@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "news-desk",
+  "main": "src/index.js",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "triggers": {
+    // Hourly on the hour, IST. UTC 00:30-16:30 == IST 06:00-22:00, so nothing
+    // runs between 23:00 and 06:00 IST.
+    // Only one cron: the account is at the free plan's 5-trigger cap, so the
+    // second ingest batch is chained through the SELF service binding instead.
+    "crons": ["30 0-16 * * *"]
+  },
+  // Self-binding: each batch of feeds needs its own subrequest budget (50 per
+  // invocation on the free plan), and a service-binding call starts a fresh one.
+  "services": [
+    { "binding": "SELF", "service": "news-desk" }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "NEWS",
+      "id": "d4cfb328b8fc49628e9cc585b064ff0c"
+    }
+  ]
+}

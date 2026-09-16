@@ -1,0 +1,15 @@
+{
+  "name": "news-desk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Market-impact news desk for Indian equity traders (India + global feeds)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.20.0"
+  },
+  "type": "module"
+}

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>News Desk</title>
+<meta name="description" content="Market-moving news for Indian equities — India + global feeds, scored by impact." />
+<meta name="theme-color" content="#0c0d0f" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230c0d0f'/><text x='16' y='23' font-size='20' text-anchor='middle' fill='%23f5b301' font-family='monospace'>N</text></svg>" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>NEWS<span>DESK</span></h1>
+  <div class="topbar-right">
+    <span class="updated" id="updated">LOADING…</span>
+    <button class="linkish" id="healthBtn" type="button">feed health</button>
+  </div>
+</header>
+
+<section class="important" id="importantPanel">
+  <div class="important-label">
+    IMPORTANT · SINCE PREVIOUS MARKET CLOSE (15:30 IST) · SCORE &ge; 10
+  </div>
+  <div class="important-list" id="importantList"><div class="empty">Loading…</div></div>
+</section>
+
+<nav class="tabs" id="tabs"></nav>
+
+<section class="controls">
+  <div class="datebox">
+    <label for="dateInput">Date (IST)</label>
+    <div class="daterow">
+      <button id="prevDay" type="button" title="Previous day">&larr;</button>
+      <input type="date" id="dateInput" />
+      <button id="nextDay" type="button" title="Next day">&rarr;</button>
+    </div>
+  </div>
+  <label class="chk"><input type="checkbox" id="hideZero" /> Hide score 0</label>
+  <label class="chk"><input type="checkbox" id="highOnly" /> Score &ge; 12</label>
+  <label class="chk"><input type="checkbox" id="groupDupes" /> Merge same story</label>
+  <input type="search" id="search" placeholder="Search headlines…" />
+  <span class="today" id="todayFlag">Today</span>
+  <button class="linkish" id="refreshBtn" type="button">refresh feeds</button>
+</section>
+
+<section class="pager" id="pagerTop"></section>
+<main id="list" class="list"><div class="empty">Loading…</div></main>
+<section class="pager" id="pagerBottom"></section>
+
+<dialog id="healthDialog">
+  <div class="dlg-head">
+    <strong>Feed health</strong>
+    <button id="closeHealth" type="button">close</button>
+  </div>
+  <div id="healthBody"></div>
+</dialog>
+
+<script src="/app.js" type="module"></script>
+</body>
+</html>
