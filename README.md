@@ -7,11 +7,11 @@ categorised and archived by IST trading day.
 
 ## How it works
 
-- A Cloudflare **Worker** (`src/index.js`) polls 45 RSS/Atom feeds **every 5 minutes**
-  (cron `*/5 * * * *`), dropping to **every 15 minutes between 23:00 and 06:00 IST**. Feeds
-  only expose their latest 10–200 items, so a long pause permanently loses stories from the
-  short ones; overnight the Indian feeds are idle and the global ones are slow enough that
-  15 minutes still catches everything.
+- A Cloudflare **Worker** (`src/index.js`) polls 46 RSS/Atom feeds **every 5 minutes during
+  Indian market hours (09:00–15:00 IST)** and **hourly outside that window**. The cron fires
+  every 5 minutes (`*/5 * * * *`) and `dueToRun()` decides which ticks do work — the window
+  would be clearer as a second cron expression, but the account is at the free plan's
+  5-trigger cap.
 - Each headline is scored 0–25 for likely impact on the Indian market, tagged with
   categories, the **instruments it plausibly moves** (Nifty/Sensex, Bank Nifty, Rupee,
   Crude/OMCs, Gold, Bond yields, IT, Metals, Pharma, Auto, US equities), a
@@ -62,17 +62,15 @@ requests — is the binding constraint. Two things keep the schedule inside it:
 
 - **A day key is only written when that batch actually added something**, so quiet runs cost
   nothing.
-- **Later batches only write `meta` every 15 minutes.** Batch 0 writes it every run so the
-  "last poll" time stays accurate; the other batches pass `meta=0` and skip it, leaving only
-  their own feed-health rows up to two runs stale. **The chained call must read the response body** (`await res.text()`), even though nothing
+- **The chained call must read the response body** (`await res.text()`), even though nothing
   uses it: `await fetch()` resolves as soon as the response headers arrive, so without that
   read the parent returns and the runtime cancels the still-running child. The symptom is
   every chained run showing `canceled` in `wrangler tail` while the cron itself reports `ok`,
   and batch 1 silently never persisting anything.
 
-That lands at roughly 230 runs/day (204 daytime + 28 overnight): ~2 day-key writes plus 1
-metadata write per run, plus a second metadata write every third run, so
-**~775 writes/day** against the 1,000 ceiling. Polling every 5 minutes around the clock with
+With the market-hours window that is **90 runs/day** (72 inside, 18 hourly outside) at about
+4 writes each, so **~360 writes/day** against the 1,000 ceiling — comfortable. Polling every
+5 minutes around the clock instead would be ~1,150 and would not fit. Polling every 5 minutes around the clock with
 no night step-down would overrun it.
 
 ## Why ingestion is batched
@@ -104,6 +102,10 @@ urgent.
 the openrss.org and rsshub mirrors are empty or blocked. Reuters copy comes in via
 syndicators instead (Channel NewsAsia, Straits Times). **Bloomberg's own feeds work**
 (`feeds.bloomberg.com/{markets,economics,politics,industries,technology}/news.rss`).
+
+`finance.yahoo.com/news/rssindex` began returning 404 in November 2026; Yahoo still serves
+headlines from `feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC`, which is what the registry
+now uses.
 
 Some publishers block Cloudflare's egress IPs even though they work from a home
 connection — Google News RSS returns 503, Bing News returns an empty document, NDTV Profit

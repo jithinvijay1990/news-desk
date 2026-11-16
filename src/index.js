@@ -13,18 +13,19 @@ const CONCURRENCY = 8;
 // the first chaining to the next through the SELF service binding.
 const BATCHES = 2;
 
-// KV allows 1,000 writes a day on the free plan. At 5-minute polling that is the
-// binding constraint, so overnight IST — when the Indian feeds are idle and the
-// global ones are slow — the cadence drops to every 15 minutes.
-const NIGHT_FROM_IST_HOUR = 23;
-const NIGHT_TO_IST_HOUR = 6;
-const NIGHT_EVERY_MINUTES = 15;
+// The cron fires every 5 minutes; this decides which of those ticks do any work.
+// Inside Indian market hours every tick runs, outside them only the top of the
+// hour. A second cron expression would say this more plainly, but the account is
+// at the free plan's 5-trigger cap.
+const ACTIVE_FROM_IST_HOUR = 9;  // 09:00 IST
+const ACTIVE_TO_IST_HOUR = 15;   // 15:00 IST, exclusive
 
 function dueToRun(ts) {
   const d = istDate(ts);
   const hour = d.getUTCHours();
-  const night = hour >= NIGHT_FROM_IST_HOUR || hour < NIGHT_TO_IST_HOUR;
-  return !night || d.getUTCMinutes() % NIGHT_EVERY_MINUTES === 0;
+  const active = hour >= ACTIVE_FROM_IST_HOUR && hour < ACTIVE_TO_IST_HOUR;
+  // IST :00 is UTC :30, which the */5 cron hits.
+  return active || d.getUTCMinutes() === 0;
 }
 function feedsForBatch(batch) {
   return FEEDS.filter((_, i) => i % BATCHES === batch);
@@ -151,12 +152,7 @@ function toItem(entry, feed, now) {
   };
 }
 
-/**
- * @param {object} [opts]
- * @param {boolean} [opts.writeMeta] false to skip the metadata write for this run
- */
-export async function ingest(env, batch = 0, opts = {}) {
-  const { writeMeta = true } = opts;
+export async function ingest(env, batch = 0) {
   const now = Date.now();
   const results = await pool(feedsForBatch(batch), CONCURRENCY, fetchFeed);
 
@@ -207,10 +203,6 @@ export async function ingest(env, batch = 0, opts = {}) {
     await env.NEWS.put(`d:${day}`, JSON.stringify(list));
     written += list.length;
   }
-
-  // Skipping the metadata write leaves this batch's feed health one run stale,
-  // which is cosmetic; the stories themselves are already written above.
-  if (!writeMeta) return { skippedMeta: true, added, stored: written };
 
   // Each batch only knows about its own feeds, so merge into the stored health map,
   // keyed by name and pruned to feeds that still exist in the registry.
@@ -310,10 +302,9 @@ async function handleApi(url, env, ctx, request) {
 
   if (path === '/api/refresh') {
     const batch = Math.min(BATCHES - 1, Math.max(0, Number(url.searchParams.get('batch')) || 0));
-    // The scheduled chain passes meta=0 on runs where this batch should not spend
-    // a metadata write; a manual refresh omits it and writes as usual.
-    const writeMeta = url.searchParams.get('meta') !== '0';
-    const chained = url.searchParams.has('meta');
+    // A chained call is part of a scheduled run, not a user retry, so it skips
+    // the throttle that stops the refresh button from stampeding.
+    const chained = url.searchParams.get('chain') === '1';
     if (!chained) {
       const prev = await readMetaRaw(env);
       const last = (prev.batchUpdated || {})[batch] || 0;
@@ -321,7 +312,7 @@ async function handleApi(url, env, ctx, request) {
         return json({ skipped: true, batch, batches: BATCHES, reason: 'this batch refreshed under 30s ago' });
       }
     }
-    const fresh = await ingest(env, batch, { writeMeta });
+    const fresh = await ingest(env, batch);
     return json({
       ok: true,
       batch,
@@ -351,15 +342,10 @@ export default {
 
   async scheduled(event, env, ctx) {
     const at = event.scheduledTime || Date.now();
-    if (!dueToRun(at)) return; // overnight IST: every 15 minutes, not every 5
+    if (!dueToRun(at)) return; // outside 09:00-15:00 IST, only the top of the hour
     ctx.waitUntil(
       (async () => {
-        // Batch 0 writes meta every run, so the "last poll" time stays accurate at
-        // the 5-minute cadence. Later batches only spend a metadata write every
-        // 15 minutes — their feed health is then at most two runs stale, which is
-        // cosmetic, and it keeps the day inside KV's 1,000-write budget.
-        const metaForLaterBatches = istDate(at).getUTCMinutes() % 15 === 0;
-        await ingest(env, 0, { writeMeta: true });
+        await ingest(env, 0);
         // Remaining batches run as separate invocations so each gets its own
         // subrequest budget. One service-binding call costs a single subrequest here.
         for (let b = 1; b < BATCHES; b++) {
@@ -367,9 +353,8 @@ export default {
             console.log('chain: SELF binding missing');
             break;
           }
-          const flag = metaForLaterBatches ? '1' : '0';
           try {
-            const res = await env.SELF.fetch(`https://news-desk.internal/api/refresh?batch=${b}&meta=${flag}`);
+            const res = await env.SELF.fetch(`https://news-desk.internal/api/refresh?batch=${b}&chain=1`);
             // Consuming the body is NOT optional: awaiting fetch() resolves as soon
             // as the response headers arrive, so without this the parent returns and
             // the runtime cancels the still-running child. That showed up as every

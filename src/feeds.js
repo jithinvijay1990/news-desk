@@ -6,6 +6,7 @@ export const FEEDS = [
   // ---------- India: markets & economy ----------
   { name: 'ET Markets',            url: 'https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms',      weight: 4, region: 'in',    hint: 'india' },
   { name: 'ET Economy',            url: 'https://economictimes.indiatimes.com/news/economy/rssfeeds/1373380680.cms', weight: 4, region: 'in',    hint: 'macro' },
+  { name: 'ET Stocks News',        url: 'https://economictimes.indiatimes.com/markets/stocks/news/rssfeeds/2146843.cms', weight: 4, region: 'in', hint: 'india' },
   { name: 'ET Industry',           url: 'https://economictimes.indiatimes.com/industry/rssfeeds/13352306.cms',       weight: 3, region: 'in',    hint: 'india' },
   { name: 'Business Standard Markets', url: 'https://www.business-standard.com/rss/markets-106.rss',                 weight: 4, region: 'in',    hint: 'india' },
   { name: 'Business Standard Economy', url: 'https://www.business-standard.com/rss/economy-102.rss',                 weight: 4, region: 'in',    hint: 'macro' },
@@ -18,7 +19,8 @@ export const FEEDS = [
   { name: 'RBI Press Releases',    url: 'https://www.rbi.org.in/pressreleases_rss.xml',                              weight: 4, region: 'in',    hint: 'macro' },
 
   // ---------- Global: markets & macro ----------
-  { name: 'Yahoo Finance',         url: 'https://finance.yahoo.com/news/rssindex',                                   weight: 3, region: 'world', hint: 'global' },
+  // finance.yahoo.com/news/rssindex started 404ing in Nov 2026; this endpoint still serves.
+  { name: 'Yahoo Finance',         url: 'https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC&region=US&lang=en-US', weight: 3, region: 'world', hint: 'global' },
   { name: 'CNBC Top News',         url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114', weight: 4, region: 'world', hint: 'global' },
   { name: 'CNBC World Markets',    url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135',  weight: 4, region: 'world', hint: 'global' },
   { name: 'CNBC Economy',          url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258',  weight: 4, region: 'world', hint: 'macro' },
