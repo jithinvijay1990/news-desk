@@ -64,10 +64,11 @@ requests — is the binding constraint. Two things keep the schedule inside it:
   nothing.
 - **Later batches only write `meta` every 15 minutes.** Batch 0 writes it every run so the
   "last poll" time stays accurate; the other batches pass `meta=0` and skip it, leaving only
-  their own feed-health rows up to two runs stale. (An earlier attempt handed health forward
-  in a `POST` body so one batch could write for all — the chained request came back
-  `canceled` every run, with the child dying the instant the parent returned. The plain `GET`
-  chain holds the parent open; don't reintroduce the body.)
+  their own feed-health rows up to two runs stale. **The chained call must read the response body** (`await res.text()`), even though nothing
+  uses it: `await fetch()` resolves as soon as the response headers arrive, so without that
+  read the parent returns and the runtime cancels the still-running child. The symptom is
+  every chained run showing `canceled` in `wrangler tail` while the cron itself reports `ok`,
+  and batch 1 silently never persisting anything.
 
 That lands at roughly 230 runs/day (204 daytime + 28 overnight): ~2 day-key writes plus 1
 metadata write per run, plus a second metadata write every third run, so

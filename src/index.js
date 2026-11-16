@@ -370,8 +370,13 @@ export default {
           const flag = metaForLaterBatches ? '1' : '0';
           try {
             const res = await env.SELF.fetch(`https://news-desk.internal/api/refresh?batch=${b}&meta=${flag}`);
+            // Consuming the body is NOT optional: awaiting fetch() resolves as soon
+            // as the response headers arrive, so without this the parent returns and
+            // the runtime cancels the still-running child. That showed up as every
+            // chained run ending "canceled" in wrangler tail, with batch 1 never
+            // persisting anything. Do not drop this read.
             const body = await res.text();
-            console.log(`chain: batch ${b} -> ${res.status} ${body.slice(0, 160)}`);
+            if (!res.ok) console.log(`chain: batch ${b} -> ${res.status} ${body.slice(0, 160)}`);
           } catch (err) {
             console.log(`chain: batch ${b} threw ${err && err.name}: ${err && err.message}`);
           }
