@@ -153,11 +153,10 @@ function toItem(entry, feed, now) {
 
 /**
  * @param {object} [opts]
- * @param {object} [opts.carry]      health/batch times handed over by an earlier batch
- * @param {boolean} [opts.writeMeta] false for an intermediate batch in a chain
+ * @param {boolean} [opts.writeMeta] false to skip the metadata write for this run
  */
 export async function ingest(env, batch = 0, opts = {}) {
-  const { carry = null, writeMeta = true } = opts;
+  const { writeMeta = true } = opts;
   const now = Date.now();
   const results = await pool(feedsForBatch(batch), CONCURRENCY, fetchFeed);
 
@@ -209,17 +208,9 @@ export async function ingest(env, batch = 0, opts = {}) {
     written += list.length;
   }
 
-  // An intermediate batch hands its health to the next one instead of writing
-  // meta itself: one meta write per run rather than one per batch.
-  if (!writeMeta) {
-    return {
-      health,
-      batchUpdated: { ...(carry?.batchUpdated || {}), [batch]: now },
-      carriedHealth: { ...(carry?.health || {}), ...health },
-      added,
-      stored: written,
-    };
-  }
+  // Skipping the metadata write leaves this batch's feed health one run stale,
+  // which is cosmetic; the stories themselves are already written above.
+  if (!writeMeta) return { skippedMeta: true, added, stored: written };
 
   // Each batch only knows about its own feeds, so merge into the stored health map,
   // keyed by name and pruned to feeds that still exist in the registry.
@@ -229,7 +220,7 @@ export async function ingest(env, batch = 0, opts = {}) {
   for (const [name, entry] of Object.entries(health)) {
     if (!entry.ok) entry.lastOk = prevFeeds[name]?.lastOk ?? null;
   }
-  const merged = { ...prevFeeds, ...(carry?.health || {}), ...health };
+  const merged = { ...prevFeeds, ...health };
   const feeds = {};
   for (const [name, entry] of Object.entries(merged)) if (known.has(name)) feeds[name] = entry;
   const all = Object.values(feeds);
@@ -237,7 +228,7 @@ export async function ingest(env, batch = 0, opts = {}) {
     updated: now,
     batch,
     batches: BATCHES,
-    batchUpdated: { ...(prev.batchUpdated || {}), ...(carry?.batchUpdated || {}), [batch]: now },
+    batchUpdated: { ...(prev.batchUpdated || {}), [batch]: now },
     feeds,
     okCount: all.filter((h) => h.ok).length,
     total: all.length,
@@ -319,28 +310,26 @@ async function handleApi(url, env, ctx, request) {
 
   if (path === '/api/refresh') {
     const batch = Math.min(BATCHES - 1, Math.max(0, Number(url.searchParams.get('batch')) || 0));
-    // A chained batch arrives with the previous batch's health in the body, and
-    // skips the throttle: the chain is the scheduled run, not a user retry.
-    let carry = null;
-    if (request && request.method === 'POST') {
-      try { carry = await request.json(); } catch { carry = null; }
-    }
-    if (!carry) {
+    // The scheduled chain passes meta=0 on runs where this batch should not spend
+    // a metadata write; a manual refresh omits it and writes as usual.
+    const writeMeta = url.searchParams.get('meta') !== '0';
+    const chained = url.searchParams.has('meta');
+    if (!chained) {
       const prev = await readMetaRaw(env);
       const last = (prev.batchUpdated || {})[batch] || 0;
       if (Date.now() - last < 30000) {
         return json({ skipped: true, batch, batches: BATCHES, reason: 'this batch refreshed under 30s ago' });
       }
     }
-    const fresh = await ingest(env, batch, { carry });
+    const fresh = await ingest(env, batch, { writeMeta });
     return json({
       ok: true,
       batch,
       batches: BATCHES,
-      updated: fresh.updated,
+      updated: fresh.updated || 0,
       stored: fresh.stored,
-      okCount: fresh.okCount,
-      total: fresh.total,
+      okCount: fresh.okCount || 0,
+      total: fresh.total || 0,
     });
   }
 
@@ -365,23 +354,18 @@ export default {
     if (!dueToRun(at)) return; // overnight IST: every 15 minutes, not every 5
     ctx.waitUntil(
       (async () => {
+        // Batch 0 writes meta every run, so the "last poll" time stays accurate at
+        // the 5-minute cadence. Later batches only spend a metadata write every
+        // 15 minutes — their feed health is then at most two runs stale, which is
+        // cosmetic, and it keeps the day inside KV's 1,000-write budget.
+        const metaForLaterBatches = istDate(at).getUTCMinutes() % 15 === 0;
+        await ingest(env, 0, { writeMeta: true });
         // Remaining batches run as separate invocations so each gets its own
-        // subrequest budget. One service-binding call costs a single subrequest
-        // here, and the health of earlier batches rides along in the body so only
-        // the final batch writes meta.
-        const last = BATCHES - 1;
-        let carry = await ingest(env, 0, { writeMeta: last === 0 });
+        // subrequest budget. One service-binding call costs a single subrequest here.
         for (let b = 1; b < BATCHES; b++) {
           if (!env.SELF) break;
-          const res = await env.SELF.fetch(`https://news-desk.internal/api/refresh?batch=${b}`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              health: carry.carriedHealth || carry.health || {},
-              batchUpdated: carry.batchUpdated || {},
-            }),
-          });
-          if (!res.ok) break;
+          const flag = metaForLaterBatches ? '1' : '0';
+          await env.SELF.fetch(`https://news-desk.internal/api/refresh?batch=${b}&meta=${flag}`);
         }
       })()
     );
