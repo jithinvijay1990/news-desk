@@ -363,9 +363,18 @@ export default {
         // Remaining batches run as separate invocations so each gets its own
         // subrequest budget. One service-binding call costs a single subrequest here.
         for (let b = 1; b < BATCHES; b++) {
-          if (!env.SELF) break;
+          if (!env.SELF) {
+            console.log('chain: SELF binding missing');
+            break;
+          }
           const flag = metaForLaterBatches ? '1' : '0';
-          await env.SELF.fetch(`https://news-desk.internal/api/refresh?batch=${b}&meta=${flag}`);
+          try {
+            const res = await env.SELF.fetch(`https://news-desk.internal/api/refresh?batch=${b}&meta=${flag}`);
+            const body = await res.text();
+            console.log(`chain: batch ${b} -> ${res.status} ${body.slice(0, 160)}`);
+          } catch (err) {
+            console.log(`chain: batch ${b} threw ${err && err.name}: ${err && err.message}`);
+          }
         }
       })()
     );
