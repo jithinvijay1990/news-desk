@@ -7,10 +7,11 @@ categorised and archived by IST trading day.
 
 ## How it works
 
-- A Cloudflare **Worker** (`src/index.js`) polls 45 RSS/Atom feeds **every hour, around the
-  clock** (cron `30 * * * *`, i.e. on the hour IST). Feeds only expose their latest 10–200
-  items, so any pause longer than an hour permanently loses stories from the short ones —
-  which is why there is no overnight window.
+- A Cloudflare **Worker** (`src/index.js`) polls 45 RSS/Atom feeds **every 5 minutes**
+  (cron `*/5 * * * *`), dropping to **every 15 minutes between 23:00 and 06:00 IST**. Feeds
+  only expose their latest 10–200 items, so a long pause permanently loses stories from the
+  short ones; overnight the Indian feeds are idle and the global ones are slow enough that
+  15 minutes still catches everything.
 - Each headline is scored 0–25 for likely impact on the Indian market, tagged with
   categories, the **instruments it plausibly moves** (Nifty/Sensex, Bank Nifty, Rupee,
   Crude/OMCs, Gold, Bond yields, IT, Metals, Pharma, Auto, US equities), a
@@ -56,11 +57,18 @@ KV namespace: `NEWS` (`d4cfb328b8fc49628e9cc585b064ff0c`), bound in `wrangler.js
 
 ## Write budget
 
-KV's free tier allows **1,000 writes a day**. Each run writes the day keys it changed plus one
-metadata key, so 24 runs × 2 batches costs roughly 150 writes/day. Day keys that a batch did
-not change are skipped, which is what keeps the around-the-clock schedule comfortably inside
-the limit. Polling every 30 minutes instead would roughly double that — still inside, but with
-much less headroom.
+KV's free tier allows **1,000 writes a day**, and at 5-minute polling that — not CPU, not
+requests — is the binding constraint. Two things keep the schedule inside it:
+
+- **A day key is only written when that batch actually added something**, so quiet runs cost
+  nothing.
+- **Only the last batch writes `meta`.** Earlier batches hand their feed health to the next
+  one in the chained request body instead of writing it themselves, making it one metadata
+  write per run rather than one per batch.
+
+That lands at roughly 230 runs/day (204 daytime + 28 overnight) and ~2 writes per run, so
+**~470 writes/day** against the 1,000 ceiling. Polling every 5 minutes around the clock with
+no night step-down would overrun it.
 
 ## Why ingestion is batched
 

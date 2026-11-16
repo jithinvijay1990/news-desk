@@ -10,8 +10,22 @@ const CONCURRENCY = 8;
 
 // A Worker invocation on the free plan may make 50 subrequests, and every feed
 // fetch plus every KV operation counts. So the feed list is ingested in batches,
-// one per cron trigger, staggered five minutes apart.
+// the first chaining to the next through the SELF service binding.
 const BATCHES = 2;
+
+// KV allows 1,000 writes a day on the free plan. At 5-minute polling that is the
+// binding constraint, so overnight IST — when the Indian feeds are idle and the
+// global ones are slow — the cadence drops to every 15 minutes.
+const NIGHT_FROM_IST_HOUR = 23;
+const NIGHT_TO_IST_HOUR = 6;
+const NIGHT_EVERY_MINUTES = 15;
+
+function dueToRun(ts) {
+  const d = istDate(ts);
+  const hour = d.getUTCHours();
+  const night = hour >= NIGHT_FROM_IST_HOUR || hour < NIGHT_TO_IST_HOUR;
+  return !night || d.getUTCMinutes() % NIGHT_EVERY_MINUTES === 0;
+}
 function feedsForBatch(batch) {
   return FEEDS.filter((_, i) => i % BATCHES === batch);
 }
@@ -137,7 +151,13 @@ function toItem(entry, feed, now) {
   };
 }
 
-export async function ingest(env, batch = 0) {
+/**
+ * @param {object} [opts]
+ * @param {object} [opts.carry]      health/batch times handed over by an earlier batch
+ * @param {boolean} [opts.writeMeta] false for an intermediate batch in a chain
+ */
+export async function ingest(env, batch = 0, opts = {}) {
+  const { carry = null, writeMeta = true } = opts;
   const now = Date.now();
   const results = await pool(feedsForBatch(batch), CONCURRENCY, fetchFeed);
 
@@ -189,6 +209,18 @@ export async function ingest(env, batch = 0) {
     written += list.length;
   }
 
+  // An intermediate batch hands its health to the next one instead of writing
+  // meta itself: one meta write per run rather than one per batch.
+  if (!writeMeta) {
+    return {
+      health,
+      batchUpdated: { ...(carry?.batchUpdated || {}), [batch]: now },
+      carriedHealth: { ...(carry?.health || {}), ...health },
+      added,
+      stored: written,
+    };
+  }
+
   // Each batch only knows about its own feeds, so merge into the stored health map,
   // keyed by name and pruned to feeds that still exist in the registry.
   const prev = await readMetaRaw(env);
@@ -197,7 +229,7 @@ export async function ingest(env, batch = 0) {
   for (const [name, entry] of Object.entries(health)) {
     if (!entry.ok) entry.lastOk = prevFeeds[name]?.lastOk ?? null;
   }
-  const merged = { ...prevFeeds, ...health };
+  const merged = { ...prevFeeds, ...(carry?.health || {}), ...health };
   const feeds = {};
   for (const [name, entry] of Object.entries(merged)) if (known.has(name)) feeds[name] = entry;
   const all = Object.values(feeds);
@@ -205,7 +237,7 @@ export async function ingest(env, batch = 0) {
     updated: now,
     batch,
     batches: BATCHES,
-    batchUpdated: { ...(prev.batchUpdated || {}), [batch]: now },
+    batchUpdated: { ...(prev.batchUpdated || {}), ...(carry?.batchUpdated || {}), [batch]: now },
     feeds,
     okCount: all.filter((h) => h.ok).length,
     total: all.length,
@@ -253,7 +285,7 @@ async function readMeta(env) {
 }
 
 // ---------------------------------------------------------------- HTTP API
-async function handleApi(url, env, ctx) {
+async function handleApi(url, env, ctx, request) {
   const path = url.pathname;
 
   if (path === '/api/day') {
@@ -287,12 +319,20 @@ async function handleApi(url, env, ctx) {
 
   if (path === '/api/refresh') {
     const batch = Math.min(BATCHES - 1, Math.max(0, Number(url.searchParams.get('batch')) || 0));
-    const prev = await readMetaRaw(env);
-    const last = (prev.batchUpdated || {})[batch] || 0;
-    if (Date.now() - last < 30000) {
-      return json({ skipped: true, batch, batches: BATCHES, reason: 'this batch refreshed under 30s ago' });
+    // A chained batch arrives with the previous batch's health in the body, and
+    // skips the throttle: the chain is the scheduled run, not a user retry.
+    let carry = null;
+    if (request && request.method === 'POST') {
+      try { carry = await request.json(); } catch { carry = null; }
     }
-    const fresh = await ingest(env, batch);
+    if (!carry) {
+      const prev = await readMetaRaw(env);
+      const last = (prev.batchUpdated || {})[batch] || 0;
+      if (Date.now() - last < 30000) {
+        return json({ skipped: true, batch, batches: BATCHES, reason: 'this batch refreshed under 30s ago' });
+      }
+    }
+    const fresh = await ingest(env, batch, { carry });
     return json({
       ok: true,
       batch,
@@ -312,7 +352,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/')) {
       try {
-        return await handleApi(url, env, ctx);
+        return await handleApi(url, env, ctx, request);
       } catch (err) {
         return json({ error: String(err.message || err) }, 500);
       }
@@ -321,14 +361,27 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    const at = event.scheduledTime || Date.now();
+    if (!dueToRun(at)) return; // overnight IST: every 15 minutes, not every 5
     ctx.waitUntil(
       (async () => {
-        await ingest(env, 0);
         // Remaining batches run as separate invocations so each gets its own
-        // subrequest budget. One service-binding call costs a single subrequest here.
+        // subrequest budget. One service-binding call costs a single subrequest
+        // here, and the health of earlier batches rides along in the body so only
+        // the final batch writes meta.
+        const last = BATCHES - 1;
+        let carry = await ingest(env, 0, { writeMeta: last === 0 });
         for (let b = 1; b < BATCHES; b++) {
           if (!env.SELF) break;
-          await env.SELF.fetch(`https://news-desk.internal/api/refresh?batch=${b}`);
+          const res = await env.SELF.fetch(`https://news-desk.internal/api/refresh?batch=${b}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              health: carry.carriedHealth || carry.health || {},
+              batchUpdated: carry.batchUpdated || {},
+            }),
+          });
+          if (!res.ok) break;
         }
       })()
     );

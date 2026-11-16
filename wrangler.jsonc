@@ -11,12 +11,13 @@
     "not_found_handling": "single-page-application"
   },
   "triggers": {
-    // Every hour, around the clock (:30 UTC == :00 IST). Feeds only expose their
-    // latest 10-200 items, so a pause longer than an hour loses stories from the
-    // short ones permanently — overnight included.
-    // Only one cron: the account is at the free plan's 5-trigger cap, so the
-    // second ingest batch is chained through the SELF service binding instead.
-    "crons": ["30 * * * *"]
+    // Every five minutes. Overnight IST the handler itself drops to every 15
+    // minutes: KV allows 1,000 writes a day on the free plan, and 5-minute
+    // polling around the clock would overrun it. A second cron expression would
+    // express that more clearly, but the account is at the free plan's 5-trigger
+    // cap, so the night schedule lives in code instead.
+    // Only one cron: the second ingest batch is chained through SELF instead.
+    "crons": ["*/5 * * * *"]
   },
   // Self-binding: each batch of feeds needs its own subrequest budget (50 per
   // invocation on the free plan), and a service-binding call starts a fresh one.
