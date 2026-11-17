@@ -55,23 +55,127 @@ function renderTabs() {
   ).join('');
 }
 
+
+// ---------------------------------------------------- near-duplicate merging
+// The story hash on the server only catches near-identical headlines. Outlets
+// reword the same story ("US moves to block..." / "US moves to curb..."), so
+// cluster by token overlap as well.
+//
+// The trap is template headlines — "Mizuho initiates Invesco coverage" and
+// "...Blackstone coverage" are 75% identical but different stories. A pair is
+// therefore NOT merged when each side carries its own rare, capitalised word,
+// which is what a differing subject looks like. Hiding a real story is a worse
+// failure than showing two similar ones, so the guard errs towards splitting.
+const SIM_THRESHOLD = 0.62;
+const RARE_MAX = 3;        // a word in this many stories or fewer is distinctive
+const WIRE_TAGS = new Set(['ap', 'reuters', 'pti', 'ani', 'afp', 'bloomberg', 'ians']);
+const CLUSTER_STOP = new Set(
+  ('the a an and or of to in on for at as by is are was were be been it its this that with from '
+  + 'after over says say said new up down not but has have will live update updates today latest '
+  + 'amid ahead more than his her their why how what when who into out off per vs').split(' ')
+);
+
+// "persists" and "persist" are the same word; treating them apart split real pairs.
+function stem(w) {
+  if (w.length > 4 && w.endsWith('ies')) return `${w.slice(0, -3)}y`;
+  if (w.length > 4 && w.endsWith('es')) return w.slice(0, -2);
+  if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1);
+  return w;
+}
+
+function titleTokens(title) {
+  return new Set(
+    title.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/)
+      .filter((w) => w.length > 2 && !CLUSTER_STOP.has(w)).map(stem)
+  );
+}
+
+/** Capitalised words, or null when the headline is Title Case and the signal is noise. */
+function capitalTokens(title) {
+  const words = title.replace(/[^A-Za-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean);
+  const caps = words.filter((w) => /^[A-Z]/.test(w));
+  if (caps.length / Math.max(1, words.length) > 0.6) return null;
+  return new Set(caps.map((w) => stem(w.toLowerCase())).filter((w) => w.length > 2 && !WIRE_TAGS.has(w)));
+}
+
+/** Assigns a cluster key `k` to every item, in place. */
+function clusterStories(items) {
+  const toks = items.map((i) => titleTokens(i.t));
+  const caps = items.map((i) => capitalTokens(i.t));
+  const df = new Map();
+  for (const set of toks) for (const t of set) df.set(t, (df.get(t) || 0) + 1);
+
+  const parent = items.map((_, i) => i);
+  const find = (x) => (parent[x] === x ? x : (parent[x] = find(parent[x])));
+  const union = (a, b) => { a = find(a); b = find(b); if (a !== b) parent[b] = a; };
+
+  // Identical server-side story hashes always belong together.
+  const byHash = new Map();
+  items.forEach((i, idx) => {
+    const k = i.h || i.id;
+    if (byHash.has(k)) union(byHash.get(k), idx);
+    else byHash.set(k, idx);
+  });
+
+  // Only compare stories that share an uncommon word, instead of all pairs.
+  const index = new Map();
+  toks.forEach((set, idx) => {
+    for (const t of set) {
+      if ((df.get(t) || 0) > 40) continue;
+      if (!index.has(t)) index.set(t, []);
+      index.get(t).push(idx);
+    }
+  });
+
+  const seen = new Set();
+  for (const list of index.values()) {
+    if (list.length > 30) continue;
+    for (let x = 0; x < list.length; x++) {
+      for (let y = x + 1; y < list.length; y++) {
+        const a = list[x];
+        const b = list[y];
+        const pair = `${a}:${b}`;
+        if (seen.has(pair)) continue;
+        seen.add(pair);
+        if (find(a) === find(b)) continue;
+
+        let shared = 0;
+        for (const t of toks[a]) if (toks[b].has(t)) shared++;
+        const sim = shared / (toks[a].size + toks[b].size - shared);
+        if (sim < SIM_THRESHOLD) continue;
+
+        const entity = (idx, t) => (df.get(t) || 0) <= RARE_MAX && (caps[idx] === null || caps[idx].has(t));
+        const aOwn = [...toks[a]].some((t) => !toks[b].has(t) && entity(a, t));
+        const bOwn = [...toks[b]].some((t) => !toks[a].has(t) && entity(b, t));
+        if (aOwn && bOwn) continue; // different subjects, same sentence shape
+
+        union(a, b);
+      }
+    }
+  }
+
+  items.forEach((i, idx) => { i.k = `c${find(idx)}`; });
+  return items;
+}
+
 /**
  * Collapse the same story carried by several outlets into one row, keeping the
- * highest-scoring copy and listing the other sources on it.
+ * highest-scoring copy and listing the others on it.
  */
 function collapse(items) {
   if (!state.groupDupes) return items;
   const by = new Map();
   for (const i of items) {
-    const key = i.h || i.id;
+    const key = i.k || i.h || i.id;
     const seen = by.get(key);
     if (!seen) {
       by.set(key, { ...i, dupes: [] });
       continue;
     }
     const better = i.sc > seen.sc || (i.sc === seen.sc && i.ts > seen.ts);
-    if (better) by.set(key, { ...i, dupes: [...new Set([...seen.dupes, seen.s])] });
-    else if (i.s !== seen.s) seen.dupes = [...new Set([...seen.dupes, i.s])];
+    // Keep what was merged away, so the badge can show it and nothing is lost.
+    if (better) by.set(key, { ...i, dupes: [...seen.dupes, { s: seen.s, t: seen.t }] });
+    else seen.dupes.push({ s: i.s, t: i.t });
   }
   return [...by.values()].sort((a, b) => b.ts - a.ts);
 }
@@ -109,7 +213,7 @@ function rowHtml(i) {
   const assets = (i.a || []).map((a) => `<span class="asset">${esc(a)}</span>`).join('');
   const why = (i.w || []).length ? ` &middot; <span class="why">${esc(i.w.join(', '))}</span>` : '';
   const dupes = (i.dupes || []).length
-    ? `<span class="dupes" title="Also carried by: ${esc(i.dupes.join(', '))}">+${i.dupes.length}</span>`
+    ? `<span class="dupes" title="Also reported as:&#10;${i.dupes.map((d) => esc(`• ${d.t} (${d.s})`)).join('&#10;')}">+${i.dupes.length}</span>`
     : '';
   return `<article class="row">
     <div class="time">${istStamp(i.ts)}</div>
@@ -124,7 +228,7 @@ function rowHtml(i) {
 }
 
 function renderImportant(data) {
-  const items = collapse(data.items || []);
+  const items = collapse(clusterStories(data.items || []));
   $('importantList').innerHTML = items.length
     ? items
         .map(
@@ -187,7 +291,7 @@ async function loadDay() {
   $('list').innerHTML = '<div class="empty">Loading…</div>';
   const res = await fetch(`/api/day?date=${state.date}`);
   const data = await res.json();
-  state.items = data.items || [];
+  state.items = clusterStories(data.items || []);
   state.updated = data.updated || state.updated;
   state.fetchedAt = Date.now();
   state.page = 1;
